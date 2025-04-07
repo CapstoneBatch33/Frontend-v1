@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+models/
 .env
 .next
 .DS_Store
