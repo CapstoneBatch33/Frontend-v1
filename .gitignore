@@ -1,9 +1,10 @@
 node_modules/
 dist/
 build/
-models/
+models
 .env
 .next
 .DS_Store
 package-lock.json
 yarn.lock
+.bin

@@ -10,29 +10,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 
-// Mock data for sensors
-const generateMockData = () => {
-  const now = new Date()
-  const data = []
-
-  for (let i = 0; i < 24; i++) {
-    const time = new Date(now)
-    time.setHours(now.getHours() - 23 + i)
-
-    data.push({
-      time: time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      moisture: Math.floor(Math.random() * 20) + 30, // 30-50%
-      temperature: Math.floor(Math.random() * 10) + 18, // 18-28°C
-      pH: (Math.random() * 2 + 5).toFixed(1), // 5.0-7.0
-      co2: Math.floor(Math.random() * 200) + 400, // 400-600 ppm
-      light: Math.floor(Math.random() * 500) + 500, // 500-1000 lux
-      humidity: Math.floor(Math.random() * 30) + 40, // 40-70%
-    })
-  }
-
-  return data
-}
-
 // Status indicators
 const getStatusColor = (value: number, type: string) => {
   switch (type) {
@@ -44,6 +21,12 @@ const getStatusColor = (value: number, type: string) => {
       return value < 6.0 ? "yellow" : value > 6.8 ? "yellow" : "green"
     case "co2":
       return value > 550 ? "yellow" : "green"
+    case "nitrogen":
+      return value < 30 ? "destructive" : value > 70 ? "yellow" : "green"
+    case "phosphorus":
+      return value < 15 ? "destructive" : value > 45 ? "yellow" : "green"
+    case "potassium":
+      return value < 50 ? "destructive" : value > 120 ? "yellow" : "green"
     default:
       return "green"
   }
@@ -65,59 +48,148 @@ const getStatusText = (color: string) => {
 }
 
 export default function Dashboard() {
-  const [data, setData] = useState(generateMockData())
+  const [data, setData] = useState([])
   const [alerts, setAlerts] = useState<string[]>([])
   const [weatherCondition, setWeatherCondition] = useState("sunny")
   const [tractorPosition, setTractorPosition] = useState(0)
   const [activeSensor, setActiveSensor] = useState<string | null>(null)
+  const [currentValues, setCurrentValues] = useState({
+    moisture: 45,
+    temperature: 25,
+    pH: 6.5,
+    co2: 450,
+    light: 850,
+    humidity: 65,
+    nitrogen: 50,
+    phosphorus: 30,
+    potassium: 80,
+    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  })
 
-  // Current values (last data point)
-  const currentValues = data[data.length - 1]
-
-  // Update data every 5 seconds
+  // Fetch sensor data and update history
   useEffect(() => {
+    // Initialize with some historical data points
+    const initialData = []
+    const now = new Date()
+    
+    for (let i = 0; i < 24; i++) {
+      const time = new Date(now)
+      time.setHours(now.getHours() - 23 + i)
+      
+      initialData.push({
+        time: time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        moisture: 45,
+        temperature: 25,
+        pH: 6.5,
+        co2: 450,
+        light: 850,
+        humidity: 65,
+        nitrogen: 50,
+        phosphorus: 30,
+        potassium: 80,
+      })
+    }
+    
+    setData(initialData)
+    
+    const fetchSensorData = async () => {
+      try {
+        // Try to fetch from Raspberry Pi first
+        const response = await fetch("http://192.168.1.37:8080/api/sensor-data", {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          },
+          // Set a short timeout to quickly fall back to local if Pi is unavailable
+          signal: AbortSignal.timeout(2000)
+        }).catch(() => null);
+        
+        let sensorData;
+        
+        if (response && response.ok) {
+          sensorData = await response.json();
+        } else {
+          // Fall back to local server
+          console.log("Could not connect to Raspberry Pi, trying local server...");
+          const localResponse = await fetch("http://localhost:8080/api/sensor-data").catch(() => null);
+          
+          if (localResponse && localResponse.ok) {
+            sensorData = await localResponse.json();
+          } else {
+            // If both fail, use random data as fallback
+            sensorData = {
+              moisture: Math.floor(Math.random() * 20) + 30,
+              temperature: Math.floor(Math.random() * 10) + 18,
+              pH: (Math.random() * 2 + 5).toFixed(1),
+              co2: Math.floor(Math.random() * 200) + 400,
+              light: Math.floor(Math.random() * 500) + 500,
+              humidity: Math.floor(Math.random() * 30) + 40,
+              nitrogen: Math.floor(Math.random() * 50) + 20,
+              phosphorus: Math.floor(Math.random() * 40) + 10,
+              potassium: Math.floor(Math.random() * 80) + 40,
+            };
+          }
+        }
+        
+        // Update current values
+        const newValues = {
+          ...currentValues,
+          ...sensorData,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        };
+        
+        setCurrentValues(newValues);
+        
+        // Update historical data
+        setData(prevData => [...prevData.slice(1), newValues]);
+        
+        // Check for alerts
+        if (newValues.moisture < 35) {
+          setAlerts(prev => [...prev.filter(a => !a.includes("moisture")), `Low soil moisture detected: ${newValues.moisture}%`]);
+        }
+        if (newValues.temperature > 25) {
+          setAlerts(prev => [...prev.filter(a => !a.includes("temperature")), `High temperature detected: ${newValues.temperature}°C`]);
+        }
+        if (newValues.nitrogen < 30) {
+          setAlerts(prev => [...prev.filter(a => !a.includes("nitrogen")), `Low nitrogen levels detected: ${newValues.nitrogen} mg/kg`]);
+        }
+        if (newValues.phosphorus < 15) {
+          setAlerts(prev => [...prev.filter(a => !a.includes("phosphorus")), `Low phosphorus levels detected: ${newValues.phosphorus} mg/kg`]);
+        }
+        if (newValues.potassium < 50) {
+          setAlerts(prev => [...prev.filter(a => !a.includes("potassium")), `Low potassium levels detected: ${newValues.potassium} mg/kg`]);
+        }
+        
+        // Limit alerts to last 5
+        if (alerts.length > 5) {
+          setAlerts(alerts.slice(-5));
+        }
+      } catch (error) {
+        console.error("Error fetching sensor data:", error);
+      }
+    };
+    
+    // Initial fetch
+    fetchSensorData();
+    
+    // Set up interval for regular updates
     const interval = setInterval(() => {
-      const newData = [
-        ...data.slice(1),
-        {
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          moisture: Math.floor(Math.random() * 20) + 30,
-          temperature: Math.floor(Math.random() * 10) + 18,
-          pH: (Math.random() * 2 + 5).toFixed(1),
-          co2: Math.floor(Math.random() * 200) + 400,
-          light: Math.floor(Math.random() * 500) + 500,
-          humidity: Math.floor(Math.random() * 30) + 40,
-        },
-      ]
-
-      setData(newData)
-
-      // Check for alerts
-      const latest = newData[newData.length - 1]
-      if (latest.moisture < 35) {
-        setAlerts((prev) => [...prev, `Low soil moisture detected: ${latest.moisture}%`])
-      }
-      if (latest.temperature > 25) {
-        setAlerts((prev) => [...prev, `High temperature detected: ${latest.temperature}°C`])
-      }
-
-      // Limit alerts to last 5
-      if (alerts.length > 5) {
-        setAlerts(alerts.slice(-5))
-      }
-
+      fetchSensorData();
+      
       // Update weather condition randomly
       if (Math.random() > 0.9) {
-        const conditions = ["sunny", "cloudy", "rainy"]
-        setWeatherCondition(conditions[Math.floor(Math.random() * conditions.length)])
+        const conditions = ["sunny", "cloudy", "rainy"];
+        setWeatherCondition(conditions[Math.floor(Math.random() * conditions.length)]);
       }
-
+      
       // Move tractor
-      setTractorPosition((prev) => (prev + 5) % 100)
-    }, 5000)
+      setTractorPosition(prev => (prev + 5) % 100);
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
-    return () => clearInterval(interval)
-  }, [data, alerts])
+  // Rest of the component remains the same, but update the charts to use correct data keys
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -213,7 +285,7 @@ export default function Dashboard() {
                     <LineChart data={data}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="time" />
-                      <YAxis domain={[20, 60]} />
+                      <YAxis domain={[0, 100]} />
                       <Tooltip />
                       <Legend />
                       <Line
@@ -304,6 +376,90 @@ export default function Dashboard() {
                         type="monotone"
                         dataKey="co2"
                         stroke="#a855f7"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 8 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Nitrogen</CardTitle>
+                <CardDescription>24-hour history (mg/kg)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={data}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="time" />
+                      <YAxis domain={[0, 100]} />
+                      <Tooltip />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="nitrogen"
+                        stroke="#16a34a"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 8 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Phosphorus</CardTitle>
+                <CardDescription>24-hour history (mg/kg)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={data}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="time" />
+                      <YAxis domain={[0, 70]} />
+                      <Tooltip />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="phosphorus"
+                        stroke="#f59e0b"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 8 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Potassium</CardTitle>
+                <CardDescription>24-hour history (mg/kg)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={data}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="time" />
+                      <YAxis domain={[0, 160]} />
+                      <Tooltip />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="potassium"
+                        stroke="#8b5cf6"
                         strokeWidth={2}
                         dot={false}
                         activeDot={{ r: 8 }}
