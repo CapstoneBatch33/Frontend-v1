@@ -336,7 +336,7 @@ export default function ChatbotPage() {
           <Tractor className="h-8 w-8 text-green-600" />
           <div>
             <h1 className="text-3xl font-bold mb-1">AI Farming Assistant</h1>
-            <p className="text-muted-foreground italic">"Growing wisdom for your growing plants"</p>
+            <p className="text-muted-foreground italic">Growing wisdom for your growing plants</p>
           </div>
         </div>
         <div className="mt-2 p-3 bg-amber-100 rounded-lg border border-amber-200 text-amber-800 text-sm">
