@@ -50,6 +50,15 @@ interface Message {
   }
 }
 
+// Add this helper function at the top of your file, outside the component
+const formatTime = (date: Date) => {
+  return date.toLocaleTimeString('en-US', { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    hour12: true 
+  }).toUpperCase();
+};
+
 export default function ChatbotPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -93,8 +102,22 @@ export default function ChatbotPage() {
   ]
 
   // Load the model when the component mounts
+  const [isModelLoaded, setIsModelLoaded] = useState(false);
+
+  // Single useEffect for model loading
   useEffect(() => {
-    loadModel().catch(err => console.error("Error loading model:", err));
+    const loadModelAsync = async () => {
+      try {
+        const { loadModel } = await import('@/lib/model-loader');
+        await loadModel();
+        setIsModelLoaded(true);
+        console.log('Model loaded successfully');
+      } catch (error) {
+        console.error('Error loading model:', error);
+      }
+    };
+
+    loadModelAsync();
   }, []);
 
   const scrollToBottom = () => {
@@ -204,110 +227,102 @@ export default function ChatbotPage() {
     if (!file) return;
 
     // Create a message showing the uploaded image
-    const userMessage: Message = {
+    const userMessage = {
       id: Date.now().toString(),
       content: "I'd like to check if this plant has any diseases.",
       sender: "user",
       timestamp: new Date(),
       image: URL.createObjectURL(file),
-    }
+    };
 
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage as Message]);
     setIsProcessingImage(true);
 
-    // Add a loading message from the bot
-    const loadingMessage: Message = {
+    // Add a loading message
+    const loadingMessage = {
       id: Date.now().toString() + "-loading",
       content: "Analyzing your plant image...",
       sender: "bot",
       timestamp: new Date(),
       isLoading: true,
-    }
+    };
 
-    setMessages((prev) => [...prev, loadingMessage]);
+    setMessages((prev) => [...prev, loadingMessage as Message]);
 
     try {
-      // Create an image element to use with the model
+      // Create an image element for processing
       const img = new Image();
       img.src = URL.createObjectURL(file);
       
       img.onload = async () => {
-        // Import the model functions dynamically
+        // Import and use the model
         const { classifyImage } = await import('@/lib/model-loader');
-        
-        // Process the image with the model
         const result = await classifyImage(img);
         
-        // Remove the loading message
+        // Remove loading message
         setMessages((prev) => prev.filter(msg => msg.id !== loadingMessage.id));
         
-        // Format the disease name for display
+        // Format disease name for display
         const formattedDiseaseName = result.class
           .replace(/_/g, ' ')
           .replace(/___/g, ' - ')
           .replace(/\b\w/g, (c) => c.toUpperCase());
         
-        // Create a response with the disease information
-        const botMessage: Message = {
+        // Add result message
+        const botMessage = {
           id: Date.now().toString(),
-          content: `${mockResponses.plantDisease} I've identified this as **${formattedDiseaseName}** with ${(result.confidence * 100).toFixed(2)}% confidence.`,
+          content: `I've analyzed the image and detected: **${formattedDiseaseName}** with ${(result.confidence * 100).toFixed(2)}% confidence.`,
           sender: "bot",
           timestamp: new Date(),
           diseaseData: result,
-        }
+        };
 
-        setMessages((prev) => [...prev, botMessage]);
+        setMessages((prev) => [...prev, botMessage as Message]);
         
-        // Add treatment recommendations based on the disease
+        // Add treatment recommendations
+        const treatmentMessage = {
+          id: Date.now().toString() + "-treatment",
+          content: getTreatmentRecommendation(result.class),
+          sender: "bot",
+          timestamp: new Date(),
+        };
+        
         setTimeout(() => {
-          const treatmentMessage: Message = {
-            id: Date.now().toString(),
-            content: getTreatmentRecommendation(result.class),
-            sender: "bot",
-            timestamp: new Date(),
-          }
-          
-          setMessages((prev) => [...prev, treatmentMessage]);
+          setMessages((prev) => [...prev, treatmentMessage as Message]);
         }, 1000);
-        
+
         setIsProcessingImage(false);
       };
     } catch (error) {
       console.error("Error processing image:", error);
       
-      // Remove the loading message
+      // Remove loading message and show error
       setMessages((prev) => prev.filter(msg => msg.id !== loadingMessage.id));
       
-      // Add an error message
-      const errorMessage: Message = {
+      const errorMessage = {
         id: Date.now().toString(),
         content: "I'm sorry, I couldn't analyze that image. Please try again with a clearer photo of the plant leaf.",
         sender: "bot",
         timestamp: new Date(),
-      }
+      };
       
-      setMessages((prev) => [...prev, errorMessage]);
+      setMessages((prev) => [...prev, errorMessage as Message]);
       setIsProcessingImage(false);
     }
-  }
+  };
 
-  // Function to get treatment recommendations based on the disease
+  // Add this helper function for treatment recommendations
   const getTreatmentRecommendation = (diseaseClass: string) => {
-    // Map of disease classes to treatment recommendations
     const treatments: Record<string, string> = {
-      'Apple___Apple_scab': 'For Apple Scab, I recommend:\n\n1. Remove and destroy infected leaves\n2. Apply fungicides like captan or myclobutanil\n3. Ensure proper spacing between trees for air circulation\n4. Consider resistant apple varieties for future plantings',
-      
-      'Apple___Black_rot': 'To treat Black Rot in apples:\n\n1. Prune out diseased branches and cankers\n2. Remove mummified fruits from trees\n3. Apply fungicides during the growing season\n4. Maintain good orchard sanitation',
-      
-      'Corn_(maize)___Common_rust_': 'For Corn Rust management:\n\n1. Plant rust-resistant corn varieties\n2. Apply fungicides like azoxystrobin or pyraclostrobin\n3. Ensure proper field drainage\n4. Rotate crops to reduce disease pressure',
-      
-      // Add more disease treatments as needed
-      
-      'default': 'For this plant condition, I recommend:\n\n1. Remove affected leaves to prevent spread\n2. Ensure proper watering (avoid overhead irrigation)\n3. Improve air circulation around plants\n4. Consider applying an appropriate fungicide or treatment\n5. Monitor closely for any changes in condition'
+      'Apple___Apple_scab': 'For Apple Scab treatment:\n• Remove infected leaves\n• Apply fungicides in early spring\n• Improve air circulation\n• Maintain proper tree spacing',
+      'Apple___Black_rot': 'To treat Black Rot:\n• Prune out dead or diseased branches\n• Remove mummified fruits\n• Apply appropriate fungicides\n• Maintain good sanitation',
+      'Corn_(maize)___Common_rust_': 'For Corn Rust management:\n• Use resistant varieties\n• Apply fungicides if severe\n• Ensure proper plant spacing\n• Monitor humidity levels',
+      // Add more treatments for other diseases
+      'default': 'General treatment recommendations:\n• Remove affected leaves\n• Improve air circulation\n• Avoid overhead watering\n• Consider applying appropriate fungicides\n• Monitor plant health regularly'
     };
     
     return treatments[diseaseClass] || treatments['default'];
-  }
+  };
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -454,7 +469,7 @@ export default function ChatbotPage() {
                               message.sender === "user" ? "text-right" : ""
                             }`}
                           >
-                            {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            {formatTime(message.timestamp)}
                           </div>
                         </div>
                       </div>
